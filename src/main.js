@@ -6,7 +6,7 @@ import { getWeatherForPlaces } from './weather.js';
 import { triggerSevereAlert, supportsVibration, onAlert, simulateSevereAlert } from './vibration.js';
 import { runJourneyAnalysis, reevalRecommendation, recomputeForDeparture } from './journey.js';
 import { LiveTracker } from './tracking.js';
-import { LocationAutocomplete, resolveLocationText, reverseGeocode } from './locationSearch.js';
+import { LocationAutocomplete, resolveLocationText, selectionDisplay, reverseGeocode } from './locationSearch.js';
 import { parseVoiceIntent, VOICE_LANGS, HERE_TOKEN } from './voice.js';
 import { createSTTSession, getSTTSetup } from './stt.js';
 import { findNearestAirports, greatCircleKm, estimateFlightMinutes } from './flight.js';
@@ -114,12 +114,16 @@ function setupDeveloperMode() {
 }
 
 function setupLocationSearch() {
+  const commitSelect = (which) => (c, forced) => {
+    markRouteStale(true);
+    if (forced) setTimeout(() => { if (!isAnalyzing) handleAnalyze(); }, 0);
+  };
   originAuto = new LocationAutocomplete(document.getElementById('origin-input'), {
-    onSelect: () => markRouteStale(true),
+    onSelect: commitSelect('origin'),
     onInput: () => markRouteStale(true)
   });
   destAuto = new LocationAutocomplete(document.getElementById('dest-input'), {
-    onSelect: () => markRouteStale(true),
+    onSelect: commitSelect('dest'),
     onInput: () => markRouteStale(true)
   });
 
@@ -354,6 +358,8 @@ function renderApp() {
       d.value = chip.dataset.dest;
       o._selection = null;
       d._selection = null;
+      if (o._autocomplete) o._autocomplete.close();
+      if (d._autocomplete) d._autocomplete.close();
       markRouteStale(true);
       handleAnalyze();
     });
@@ -919,8 +925,9 @@ async function resolveInputLocation(which) {
 
   const sel = input._selection;
   if (sel && sel.lat != null) {
-    const name = (sel.placeName || (sel.displayName || '').split(',')[0] || '').toLowerCase();
-    if (text.toLowerCase() === name) return withShortName(sel);
+    const t = text.toLowerCase();
+    const short = (sel.placeName || (sel.displayName || '').split(',')[0] || '').toLowerCase();
+    if (t === short || t === selectionDisplay(sel).toLowerCase()) return withShortName(sel);
   }
 
   if (auto && auto.open && auto.analysis && auto.analysis.confident) {
@@ -1467,6 +1474,10 @@ function handleSwap() {
   const sel = origin._selection;
   origin._selection = dest._selection || null;
   dest._selection = sel || null;
+  if (origin._selection) origin.value = selectionDisplay(origin._selection);
+  if (dest._selection) dest.value = selectionDisplay(dest._selection);
+  origin._selectionVersion = (origin._selectionVersion || 0) + 1;
+  dest._selectionVersion = (dest._selectionVersion || 0) + 1;
   markRouteStale(true);
 }
 
@@ -2996,14 +3007,17 @@ function applyField(which, candidate, isHere, expectedSeq) {
       input.value = '';
       input._selection = currentLocation ? { ...currentLocation } : null;
     } else {
-      input.value = candidate.placeName || '';
+      input.value = selectionDisplay(candidate);
       input._selection = candidate;
     }
   } else {
-    input.value = candidate.placeName || '';
+    input.value = selectionDisplay(candidate);
     input._selection = candidate;
   }
-  if (input) input._editSeq = seq + 1;
+  if (input) {
+    input._editSeq = seq + 1;
+    input._selectionVersion = (input._selectionVersion || 0) + 1;
+  }
   markRouteStale(true);
   return true;
 }

@@ -32,7 +32,7 @@ function throttledFetch(url, options = {}) {
 const PLACE_ALIASES = {
   'Tumakuru': ['tumko', 'tumakuar', 'tumakoor', 'tumakur', 'tumkur', 'tamkur', 'tamko', 'tumkoor', 'tumkure'],
   'Bengaluru': ['bangalore', 'bangluru', 'banglore', 'banglare', 'bangaluru', 'bengalur', 'bangloor', 'banglure', 'bengalore', 'bangl'],
-  'Mysuru': ['mysore', 'mysoor', 'maysore', 'mysur', 'maysuru', 'maysor'],
+  'Mysuru': ['mysore', 'mysoor', 'maysore', 'mysur', 'maysuru', 'maysor', 'mys'],
   'Mangaluru': ['mangalore', 'manglore', 'mangalur', 'mangloore', 'mangloor'],
   'Hubballi': ['hubli', 'hubballi', 'hubali', 'hubbali', 'huball'],
   'Belagavi': ['belgaum', 'belagau', 'belagoom', 'belgavi', 'belgavu'],
@@ -553,6 +553,7 @@ function parseCandidate(d) {
   return {
     placeName: latinName || defaultName,
     region: pickRegion(d),
+    stateName: String(addr.state || '').trim(),
     displayName: latinName && isNonLatin(defaultDisplay)
       ? [latinName, addr.state, addr.country].filter(Boolean).join(', ')
       : defaultDisplay,
@@ -859,6 +860,8 @@ export class LocationAutocomplete {
 
   _bind() {
     this.input.addEventListener('input', () => {
+      const sel = this.input._selection;
+      if (sel && sel.lat != null && this.input.value === selectionDisplay(sel)) return;
       if (this._suppressInputEvent) return;
       this.input._editSeq = (this.input._editSeq || 0) + 1;
       this._clearSelection();
@@ -866,7 +869,11 @@ export class LocationAutocomplete {
       if (this.onInput) this.onInput();
     });
     this.input.addEventListener('focus', () => {
-      if (this.input.value.trim().length >= 2) this._schedule(this.input.value);
+      const sel = this.input._selection;
+      const v = this.input.value.trim();
+      if (sel && sel.lat != null && v === selectionDisplay(sel)) return;
+      if (this.analysis && this.analysis.forced) return;
+      if (v.length >= 2) this._schedule(v);
     });
     this.input.addEventListener('keydown', (e) => this._onKeydown(e));
     this.input.addEventListener('blur', () => {
@@ -1026,6 +1033,7 @@ export class LocationAutocomplete {
 
   showSuggestion(suggestions, { didYouMean = false, heading = null } = {}) {
     this.analysis = {
+      forced: true,
       head: heading || (didYouMean ? 'didyoumean' : null),
       confident: false,
       top: suggestions.map(c => ({ c, match: 'strong', score: 1 }))
@@ -1055,16 +1063,18 @@ export class LocationAutocomplete {
 
   selectItem(item) {
     const c = item.c || {};
+    if (!c || c.lat == null) return;
     if (c.placeName && c.lat != null) rememberCandidate(c);
+    const shown = selectionDisplay(c);
+    const forced = !!(this.analysis && this.analysis.forced);
     this._suppressInputEvent = true;
-    this.input.value = c.placeName || (c.displayName || '').split(',')[0] || this.input.value;
-    this._suppressInputEvent = false;
-    this.input._editSeq = (this.input._editSeq || 0) + 1;
-    this._selectionVersion = (this._selectionVersion || 0) + 1;
     this.input._selection = c;
-    this.input._selectionVersion = this._selectionVersion;
+    this.input.value = shown || this.input.value;
+    this._suppressInputEvent = false;
+    this.input._selectionVersion = (this.input._selectionVersion || 0) + 1;
+    this.input._editSeq = (this.input._editSeq || 0) + 1;
     this.close();
-    if (this.onSelect) this.onSelect(c);
+    if (this.onSelect) this.onSelect(c, forced);
   }
 
   close() {
@@ -1086,6 +1096,23 @@ export class LocationAutocomplete {
     this.close();
     this.drop.remove();
   }
+}
+
+export function selectionDisplay(c) {
+  if (!c) return '';
+  const p = c.placeName || (c.displayName || '').split(',')[0] || '';
+  let r = c.stateName || '';
+  if (!r || r === p) {
+    const regionParts = String(c.region || '').split(',').map(s => s.trim()).filter(Boolean);
+    r = regionParts[regionParts.length - 1] || '';
+  }
+  if (r === p) r = '';
+  let k = c.country || '';
+  if (!k || k === r || k === p) k = '';
+  const parts = [p, r, k].filter(Boolean);
+  if (parts.length >= 2) return parts.join(', ');
+  const tail = (c.displayName || '').split(',').map(s => s.trim()).filter(Boolean).slice(0, 3);
+  return tail.length >= 2 ? tail.join(', ') : p;
 }
 
 function escapeHtml(str) {
