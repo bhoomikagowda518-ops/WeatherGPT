@@ -1,4 +1,6 @@
 import './style.css';
+import 'maplibre-gl/dist/maplibre-gl.css';
+import maplibregl from 'maplibre-gl';
 import { getDistanceCache } from './routing.js';
 import { getWeatherForPlaces } from './weather.js';
 import { triggerSevereAlert, supportsVibration, onAlert, simulateSevereAlert } from './vibration.js';
@@ -42,6 +44,7 @@ let voiceCtx = null;
 let voiceToastTimer = null;
 
 let currentLocation = null;
+let currentLocationToken = 0;
 let currentOriginMode = 'search';
 let restartTimer = null;
 let analysisVersion = 0;
@@ -61,7 +64,11 @@ const OSM_STYLE = {
   sources: {
     'osm': {
       type: 'raster',
-      tiles: ['https://tile.openstreetmap.org/{z}/{x}/{y}.png'],
+      tiles: [
+        'https://a.tile.openstreetmap.org/{z}/{x}/{y}.png',
+        'https://b.tile.openstreetmap.org/{z}/{x}/{y}.png',
+        'https://c.tile.openstreetmap.org/{z}/{x}/{y}.png'
+      ],
       tileSize: 256,
       attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
       maxzoom: 19
@@ -341,6 +348,8 @@ function renderApp() {
     chip.addEventListener('click', () => {
       const o = document.getElementById('origin-input');
       const d = document.getElementById('dest-input');
+      o._editSeq = (o._editSeq || 0) + 1;
+      d._editSeq = (d._editSeq || 0) + 1;
       o.value = chip.dataset.origin;
       d.value = chip.dataset.dest;
       o._selection = null;
@@ -360,6 +369,12 @@ function renderApp() {
   document.getElementById('dest-input').addEventListener('keydown', (e) => {
     if (e.key === 'Enter' && !(destAuto && destAuto.open)) handleAnalyze();
   });
+
+  // Per-field edit sequences let voice resolution refuse to overwrite a field
+  // the user has edited while the geocoder was still resolving. The actual
+  // bumping happens inside LocationAutocomplete (on typing and on selection).
+  document.getElementById('origin-input')._editSeq = 0;
+  document.getElementById('dest-input')._editSeq = 0;
 
   document.getElementById('dev-toggle').addEventListener('click', () => {
     document.getElementById('dev-controls').classList.toggle('hidden');
@@ -959,6 +974,7 @@ function setCurrentOriginMode(mode) {
   const panel = document.getElementById('current-loc-panel');
   const crosshair = document.getElementById('loc-crosshair');
   const originInput = document.getElementById('origin-input');
+  if (originInput) originInput._editSeq = (originInput._editSeq || 0) + 1;
 
   if (wrap) wrap.style.display = isCurrent ? 'none' : '';
   if (crosshair) crosshair.classList.toggle('active', isCurrent);
@@ -966,8 +982,10 @@ function setCurrentOriginMode(mode) {
 
   if (isCurrent) {
     if (originInput && originInput._autocomplete) originInput._autocomplete.close();
-    if (!currentLocation) useCurrentLocation();
+    useCurrentLocation();
   } else {
+    currentLocationToken++;
+    currentLocation = null;
     markRouteStale(true);
   }
 }
@@ -977,6 +995,7 @@ function useCurrentLocation() {
   const nameEl = document.getElementById('current-loc-name');
   const retryEl = document.getElementById('current-loc-retry');
   const fallbackEl = document.getElementById('current-loc-fallback');
+  const token = ++currentLocationToken;
 
   const setSub = (text, state) => {
     if (nameEl) nameEl.textContent = text;
@@ -986,46 +1005,68 @@ function useCurrentLocation() {
     if (state === 'failed' && panel) panel.classList.add('loc-failed');
   };
 
-  if (!navigator.geolocation) {
-    setSub('Location access is unavailable. Use search for a starting point instead.', 'failed');
+  const isStale = () => token !== currentLocationToken || currentOriginMode !== 'current';
+
+  if (!('geolocation' in navigator)) {
+    setSub('Location access is unavailable in this browser. Use search for a starting point instead.', 'failed');
     return;
   }
 
-  setSub('Locating…', 'loading');
+  if (!window.isSecureContext && location.hostname !== 'localhost' && location.hostname !== '127.0.0.1') {
+    setSub('Location access requires a secure connection (HTTPS or localhost). Use search for a starting point instead.', 'failed');
+    return;
+  }
+
+  setSub('Detecting your location\u2026', 'loading');
   currentLocation = null;
 
   navigator.geolocation.getCurrentPosition((pos) => {
-    const { latitude, longitude } = pos.coords;
+    if (isStale()) return;
+    const { latitude, longitude, accuracy } = pos.coords;
     reverseGeocode(latitude, longitude).then((rev) => {
+      if (isStale()) return;
+      const name = (rev && rev.shortName) || 'this location';
       currentLocation = {
         lat: latitude,
         lng: longitude,
-        placeName: (rev && rev.shortName) || 'this location',
+        accuracy: accuracy != null ? accuracy : null,
+        timestamp: Date.now(),
+        placeName: name,
         region: (rev && rev.region) || '',
         displayName: (rev && rev.displayName) || 'Your current location',
-        shortName: (rev && rev.shortName) || 'Your current location',
+        shortName: name === 'this location' ? 'Your current location' : name,
         source: 'current'
       };
       const parts = [currentLocation.shortName, currentLocation.region].filter(Boolean);
-      setSub(parts.join(', '), 'ready');
+      let label = parts.join(', ') || 'Your current location';
+      if (currentLocation.accuracy != null && currentLocation.accuracy > 1000) label += ' (limited accuracy)';
+      setSub(label, 'ready');
       markRouteStale(true);
     }).catch(() => {
+      if (isStale()) return;
       currentLocation = {
         lat: latitude,
         lng: longitude,
+        accuracy: accuracy != null ? accuracy : null,
+        timestamp: Date.now(),
         placeName: 'Your current location',
         region: '',
         displayName: 'Your current location',
         shortName: 'Your current location',
         source: 'current'
       };
-      setSub('Your current location', 'ready');
+      setSub('Your current location detected', 'ready');
       markRouteStale(true);
     });
   }, (err) => {
+    if (isStale()) return;
     let msg = 'Couldn\u2019t get your current location. Try again or search for a starting point.';
     if (err && err.code === 1) {
-      msg = 'Location access is unavailable. Allow location access to use your current position.';
+      msg = 'Location permission was denied. Search for a starting point instead.';
+    } else if (err && err.code === 2) {
+      msg = 'Your current location couldn\u2019t be determined. Try again or search for a starting point.';
+    } else if (err && err.code === 3) {
+      msg = 'Location detection timed out. Try again or search for a starting point.';
     }
     setSub(msg, 'failed');
   }, { enableHighAccuracy: true, timeout: 12000, maximumAge: 60000 });
@@ -1418,6 +1459,8 @@ function handleSwap() {
   }
   const origin = document.getElementById('origin-input');
   const dest = document.getElementById('dest-input');
+  origin._editSeq = (origin._editSeq || 0) + 1;
+  dest._editSeq = (dest._editSeq || 0) + 1;
   const tmp = origin.value;
   origin.value = dest.value;
   dest.value = tmp;
@@ -2867,6 +2910,13 @@ async function resolveAndApply(originSpec, destSpec, sid) {
     return;
   }
 
+  // Snapshot the current edit sequences so a slow geocoder response can never
+  // overwrite a field the user has since edited (stale-voice protection).
+  const originInput = document.getElementById('origin-input');
+  const destInput = document.getElementById('dest-input');
+  const originSeq = originInput ? (originInput._editSeq || 0) : 0;
+  const destSeq = destInput ? (destInput._editSeq || 0) : 0;
+
   setVoiceState('understanding');
   setVoiceStatus('Checking places\u2026');
 
@@ -2891,9 +2941,9 @@ async function resolveAndApply(originSpec, destSpec, sid) {
     updateVoiceDebug('conf', `${oRes.match || oRes.status} / ${dRes.match || dRes.status}`);
 
     if (oRes.status === 'resolved' && dRes.status === 'resolved') {
-      applyField('origin', oRes.selection, originIsHere);
-      applyField('dest', dRes.selection);
-      tryCompleteVoice(sid);
+      const okOrigin = applyField('origin', oRes.selection, originIsHere, originSeq);
+      const okDest = applyField('dest', dRes.selection, false, destSeq);
+      if (okOrigin || okDest) tryCompleteVoice(sid);
       return;
     }
     if (oRes.status === 'error' || dRes.status === 'error') {
@@ -2904,6 +2954,16 @@ async function resolveAndApply(originSpec, destSpec, sid) {
       const missing = oRes.status !== 'resolved' ? originSpec : destSpec;
       failVoice(sid, `I couldn\u2019t find \u201C${missing}\u201D. Try saying it again, or type it below.`);
       return;
+    }
+
+    // Apply whichever side already resolved now, so a confirmation round-trip
+    // never leaves the other field empty (the pending side is filled when the
+    // user picks a candidate).
+    if (oRes.status === 'resolved' && (dRes.status === 'suggest' || dRes.status === 'none')) {
+      applyField('origin', oRes.selection, originIsHere, originSeq);
+    }
+    if (dRes.status === 'resolved' && (oRes.status === 'suggest' || oRes.status === 'none')) {
+      applyField('dest', dRes.selection, false, destSeq);
     }
 
     const pending = oRes.status !== 'resolved'
@@ -2918,23 +2978,34 @@ async function resolveAndApply(originSpec, destSpec, sid) {
   }
 }
 
-function applyField(which, candidate, isHere) {
+/* Applies a resolved candidate to a field. `expectedSeq` is the field's edit
+   sequence captured when the (possibly async) voice resolution started; if the
+   user has since edited the field, the write is refused so a stale voice result
+   can never silently overwrite a newer manual choice. Returns true when applied. */
+function applyField(which, candidate, isHere, expectedSeq) {
+  const input = which === 'origin' ? document.getElementById('origin-input') : document.getElementById('dest-input');
+  const seq = input ? (input._editSeq || 0) : 0;
+  if (expectedSeq != null && seq !== expectedSeq) {
+    addDevLog(`[voice] skipped stale ${which} write (editSeq ${seq} !== ${expectedSeq})`);
+    return false;
+  }
+
   if (which === 'origin') {
     if (isHere) {
       if (currentOriginMode !== 'current') setCurrentOriginMode('current');
-      document.getElementById('origin-input').value = '';
-      document.getElementById('origin-input')._selection = currentLocation ? { ...currentLocation } : null;
+      input.value = '';
+      input._selection = currentLocation ? { ...currentLocation } : null;
     } else {
-      const input = document.getElementById('origin-input');
       input.value = candidate.placeName || '';
       input._selection = candidate;
     }
   } else {
-    const input = document.getElementById('dest-input');
     input.value = candidate.placeName || '';
     input._selection = candidate;
   }
+  if (input) input._editSeq = seq + 1;
   markRouteStale(true);
+  return true;
 }
 
 function tryCompleteVoice(sid) {
@@ -2999,6 +3070,17 @@ function confirmVoicePlace() {
   if (pending.which === 'origin') voiceCtx.originSel = c;
   else voiceCtx.destSel = c;
   voiceCtx.pending = null;
+
+  const oReady = voiceCtx.originIsHere ? !!currentLocation : !!voiceCtx.originSel;
+  const dReady = !!voiceCtx.destSel;
+  if (!oReady) {
+    promptFor('origin', sid);
+    return;
+  }
+  if (!dReady) {
+    promptFor('destination', sid);
+    return;
+  }
   tryCompleteVoice(sid);
 }
 

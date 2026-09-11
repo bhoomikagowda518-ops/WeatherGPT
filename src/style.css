@@ -2908,3 +2908,258 @@ body.developer-mode .header-logo {
     height: 100%;
   }
 }
+
+/* ==========================================================================
+   Weather Impact Reports
+   ========================================================================== */
+
+.report-section {
+  background: var(--card);
+  border: 1px solid var(--border-light);
+  border-radius: 20px;
+  box-shadow: var(--shadow-md);
+  padding: 18px;
+}
+
+.report-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.report-title {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.report-sub {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-top: 2px;
+}
+
+.report-retry {
+  flex-shrink: 0;
+  border: 1.5px solid var(--border);
+  background: var(--card);
+  color: var(--primary);
+  border-radius: 10px;
+  padding: 6px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.report-retry:hover {
+  border-color: var(--primary);
+  background: var(--primary-lighter);
+}
+
+.report-state {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px;
+  border-radius: 14px;
+  background: var(--border-light);
+  color: var(--text-secondary);
+  font-size: 13px;
+}
+
+.report-state .spinner {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+}
+
+.report-state.warn {
+  background: #FEF3C7;
+  color: #92400E;
+}
+
+.report-state.ok {
+  background: #ECFDF5;
+  color: #065F46;
+}
+
+.rs-title {
+  font-weight: 700;
+  font-size: 13px;
+  margin-bottom: 2px;
+}
+
+.rs-sub {
+  font-size: 12px;
+  opacity: 0.85;
+  line-height: 1.4;
+}
+
+/* --- Individual report card --- */
+.wreport {
+  border: 1px solid var(--border-light);
+  border-left: 4px solid var(--wr-color, var(--primary));
+  border-radius: 14px;
+  padding: 12px 14px;
+  margin-top: 10px;
+  background: var(--card);
+  transition: box-shadow 0.15s ease;
+}
+
+.wreport:hover {
+  box-shadow: 0 6px 16px rgba(15, 23, 42, 0.1);
+}
+
+.wreport-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.wreport-emoji {
+  font-size: 20px;
+  line-height: 1.2;
+  flex-shrink: 0;
+}
+
+.wreport-title-wrap {
+  flex: 1;
+  min-width: 0;
+}
+
+.wreport-title {
+  font-size: 13.5px;
+  font-weight: 700;
+  color: var(--text);
+  line-height: 1.3;
+}
+
+.wreport-meta {
+  font-size: 11.5px;
+  color: var(--text-muted);
+  margin-top: 2px;
+  line-height: 1.4;
+}
+
+.wreport-badge {
+  flex-shrink: 0;
+  font-size: 10.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #fff;
+  background: var(--wr-color, var(--primary));
+  border-radius: 999px;
+  padding: 3px 9px;
+}
+
+.wreport-subrow {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-top: 8px;
+  border-top: 1px dashed var(--border-light);
+  padding-top: 8px;
+}
+
+.wreport-why {
+  display: block;
+  width: 100%;
+  text-align: left;
+  border: none;
+  background: none;
+  color: var(--primary);
+  font-size: 12px;
+  font-weight: 600;
+  padding: 8px 0 2px;
+  cursor: pointer;
+}
+
+.wreport-why:hover {
+  color: var(--primary-hover);
+}
+
+.wreport-why-details {
+  display: none;
+  margin-top: 6px;
+  border-top: 1px solid var(--border-light);
+  padding-top: 8px;
+}
+
+.wreport-why-details.show {
+  display: block;
+}
+
+.wr-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 12px;
+  padding: 3px 0;
+  color: var(--text-secondary);
+}
+
+.wr-row span:first-child {
+  color: var(--text-muted);
+  flex-shrink: 0;
+  font-weight: 600;
+}
+
+.wr-row a {
+  color: var(--primary);
+}
+
+.wr-note {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-top: 6px;
+  line-height: 1.45;
+}
+
+.wreport-score {
+  margin-top: 8px;
+  background: var(--border-light);
+  border-radius: 10px;
+  padding: 8px 10px;
+}
+
+.ws-row {
+  display: flex;
+  justify-content: space-between;
+  font-size: 11px;
+  color: var(--text-secondary);
+  padding: 1px 0;
+}
+
+.ws-total {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--primary);
+  margin-top: 4px;
+}
+
+.wreport-impact {
+  margin-top: 10px;
+  border-radius: 10px;
+  background: #FEF3C7;
+  color: #92400E;
+  font-size: 12px;
+  line-height: 1.45;
+  padding: 8px 10px;
+}
+
+.wreport-severe .wreport-impact {
+  background: #FEE2E2;
+  color: #991B1B;
+}
+
+.wreport-raw {
+  margin-top: 8px;
+}
+
+.wreport-raw summary {
+  font-size: 11px;
+  color: var(--text-muted);
+  cursor: pointer;
+}

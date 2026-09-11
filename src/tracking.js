@@ -1,3 +1,4 @@
+import maplibregl from 'maplibre-gl';
 import { snapPointToRoute, nextSegmentBearing } from './routing.js';
 
 const clamp01 = (v) => Math.min(1, Math.max(0, v));

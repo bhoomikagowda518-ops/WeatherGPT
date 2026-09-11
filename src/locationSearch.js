@@ -8,6 +8,130 @@ const INDIA_FIRST = true;
 
 const searchCache = new Map();
 
+/* Polite Nominatim gate: serialise every fetch so it never fires more than
+   one request in any 800ms window. The public tier enforces ~1 req/s and
+   returns HTTP 429 on violations. A gated sequence eliminates 429s entirely
+   with no retry penalty — each request simply waits its turn.              */
+let _reqGate = Promise.resolve();
+function throttledFetch(url, options = {}) {
+  const p = _reqGate.then(() => fetch(url, options));
+  _reqGate = p.catch(() => {}).then(() => new Promise(r => setTimeout(r, 800)));
+  return p;
+}
+
+/* =====================================================================
+   Query normalization layer (alias + phonetic).
+   A SMALL alias set for common Indian/Kannada place-name variants and
+   imperfect speech-to-text misrecognitions (e.g. "Tumko" -> "Tumakuru").
+   This is NOT a place database and it NEVER filters global search: it only
+   rewrites a query token that otherwise produces no strong geocoder match
+   into a spelling the geocoder reliably resolves. Every coordinate still
+   comes from the real geocoder; nothing is invented here.
+   ===================================================================== */
+
+const PLACE_ALIASES = {
+  'Tumakuru': ['tumko', 'tumakuar', 'tumakoor', 'tumakur', 'tumkur', 'tamkur', 'tamko', 'tumkoor', 'tumkure'],
+  'Bengaluru': ['bangalore', 'bangluru', 'banglore', 'banglare', 'bangaluru', 'bengalur', 'bangloor', 'banglure', 'bengalore', 'bangl'],
+  'Mysuru': ['mysore', 'mysoor', 'maysore', 'mysur', 'maysuru', 'maysor'],
+  'Mangaluru': ['mangalore', 'manglore', 'mangalur', 'mangloore', 'mangloor'],
+  'Hubballi': ['hubli', 'hubballi', 'hubali', 'hubbali', 'huball'],
+  'Belagavi': ['belgaum', 'belagau', 'belagoom', 'belgavi', 'belgavu'],
+  'Hassan': ['hasan', 'hassan'],
+  'Shivamogga': ['shimoga', 'shivamoga', 'shimogga'],
+  'Davanagere': ['davangere', 'davanager', 'davnagere'],
+  'Kalaburagi': ['gulbarga', 'kalburgi', 'kalgiburg'],
+  'Vijayapura': ['bijapur', 'vijapura', 'vijayapur'],
+  'Ballari': ['bellary', 'ballary', 'belari'],
+  'Chikkamagaluru': ['chikmagalur', 'chickmagalur', 'chikkamagaluru', 'chikmagaluru'],
+  'Madikeri': ['madikeri', 'mercara', 'mercara'],
+  'Kodagu': ['coorg', 'kodgu', 'kodag'],
+  'Udupi': ['udupi', 'oodipu', 'udipi'],
+  'Bagalkote': ['bagalkot', 'bagalkote', 'bagalkotta'],
+  'Chitradurga': ['chitradurga', 'chitradurg'],
+  'Hospet': ['hosapete', 'hospete'],
+  'Ramanagara': ['ramanagara', 'ramanagaram'],
+  'Channapatna': ['channapatna', 'channapatra'],
+  'Gokarna': ['gokarna', 'gokarn'],
+  'Srirangapatna': ['srirangapatna', 'srirangapatana'],
+  'Kolar': ['kolara'],
+  'Dharwad': ['dharawad'],
+  'Mandya': ['manda'],
+  'Haveri': ['haver'],
+  'Raichur': ['raichoor'],
+  'Bidar': ['bidar'],
+  'Hampi': ['hampi'],
+  'Thiruvananthapuram': ['trivandrum', 'thiruvanthapuram', 'tiruvananthapuram'],
+  'Kochi': ['cochin'],
+  'Kozhikode': ['calicut', 'kozhicode'],
+  'Tiruchirappalli': ['trichy', 'tiruchirappally', 'tiruchi'],
+  'Puducherry': ['pondicherry'],
+  'Roma': ['rome'],
+  'München': ['munich', 'munchen'],
+  'Firenze': ['florence'],
+  'Praha': ['prague'],
+  'Genova': ['genoa']
+};
+
+function phoneticFold(s) {
+  return fold(s);
+}
+
+function consonantSkeleton(s) {
+  return fold(s).replace(/[aeiouy]/g, '');
+}
+
+// Prefix-anchored phonetic similarity for noisy place tokens. Levenshtein over
+// the folded strings plus a bonus when the leading consonant skeleton agrees.
+function phoneticScore(q, candidate) {
+  const a = fold(q);
+  const b = fold(candidate);
+  const r = ratio(a, b);
+  const skA = consonantSkeleton(a);
+  const skB = consonantSkeleton(b);
+  const skR = skA && skB ? ratio(skA, skB) : 0;
+  let anchored = 0;
+  const maxLen = Math.min(4, a.length, b.length);
+  for (let i = 0; i < maxLen; i++) {
+    if (a[i] === b[i]) anchored++;
+    else break;
+  }
+  const prefix = maxLen > 0 ? anchored / maxLen : 0;
+  return 0.5 * r + 0.3 * skR + 0.2 * prefix;
+}
+
+// Look up a canonical spelling for a token that failed to geocode strongly.
+// Returns { canonical, strength } when a confident alias/phonetic match exists.
+function aliasMatchFor(token) {
+  const q = fold(token || '');
+  if (!q || q.length < 3) return null;
+
+  // 1. Exact variant / canonical spelling match.
+  for (const [canonical, variants] of Object.entries(PLACE_ALIASES)) {
+    if (fold(canonical) === q) return { canonical, strength: 'exact' };
+    for (const v of variants) {
+      if (fold(v) === q) return { canonical, strength: 'exact' };
+    }
+  }
+
+  // 2. Phonetic match against the alias set (high threshold, so a random
+  //    global place name is never rewritten into an Indian one).
+  let best = null;
+  for (const canonical of Object.keys(PLACE_ALIASES)) {
+    const candFold = fold(canonical);
+    if (candFold === q) continue;
+    const sim = phoneticScore(q, candFold);
+    if (sim >= 0.72 && (!best || sim > best.sim)) best = { canonical, strength: 'phonetic', sim };
+  }
+  return best;
+}
+
+export function normalizePlaceQuery(token) {
+  const match = aliasMatchFor(token);
+  return match ? match.canonical : null;
+}
+
+/* ===================================================================== */
+
 const PLACE_MEMORY = [];
 const PLACE_MEMORY_MAX = 40;
 
@@ -167,13 +291,31 @@ function rankCandidate(query, c) {
   } else if (name && ql >= 4 && (coreOf(q) === coreOf(name) && coreOf(q).length >= 4 || best >= 0.5)) {
     match = 'fuzzy';
   }
-  return { score: best, match };
+
+  // "London" typed, "Greater London" found: when the query IS a whole word of
+  // the candidate's PLACE NAME (not its address/road display string), it is
+  // effectively the same place name, so promote it into the exact tier and let
+  // importance break the tie between duplicates ("London" UK vs "London" CA).
+  const qFold = fold(query);
+  if (match === 'weak' && qFold.length >= 3 && name) {
+    const nameWords = new Set(fold(c.placeName || '').split(/\s+/).filter(Boolean));
+    if (nameWords.has(qFold)) match = 'exact';
+  }
+  return { score: match === 'exact' ? Math.max(best, 1) : best, match };
 }
 
 const MATCH_RANK = { exact: 0, strong: 1, partial: 2, fuzzy: 3, weak: 4 };
 
 const POPULATED_TYPES = new Set(['city', 'town', 'village', 'hamlet', 'township', 'municipality', 'suburb']);
 const ADMIN_TYPES = new Set(['administrative', 'county', 'state_district', 'district', 'region']);
+const POI_TYPES = new Set(['estate_agent', 'hospital', 'bakery', 'cinema', 'clothes', 'pharmacy', 'motorway', 'residential', 'path', 'tertiary', 'retail', 'hotel', 'restaurant', 'shop', 'office']);
+
+// A candidate that represents an actual location as opposed to a business,
+// road or amenity POI (Nominatim often surfaces POIs for loose full-text
+// matches like "banglore" -> estate agents in Bengaluru).
+function isPlaceLike(c) {
+  return POPULATED_TYPES.has(c.type) || ADMIN_TYPES.has(c.type);
+}
 
 // Lower weight wins when two candidates collapse to the same place.
 function candidateWeight(c) {
@@ -243,20 +385,76 @@ function dedupeCandidates(candidates) {
   return list;
 }
 
+// Global search with a regional preference (Karnataka > India > rest of the
+// world). This is a RANKING signal only - it never removes candidates, so
+// legitimate international results always remain searchable.
+function regionalTier(c) {
+  const cc = String(c.countryCode || '').toUpperCase();
+  if (cc === 'IN') {
+    const hay = `${c.region || ''} ${c.displayName || ''} ${c.placeName || ''}`;
+    if (/karnataka|karnataka,/i.test(hay)) return 2;
+    return 1;
+  }
+  return 0;
+}
+
+// If the user explicitly typed a region/country token (e.g. "London UK",
+// "Kathmandu Nepal", "Dubai UAE"), candidates carrying that token are boosted
+// strongly so explicit user intent overrides the default regional preference.
+function explicitRegionBoost(c, q) {
+  const qFold = fold(q || '');
+  if (!qFold) return 0;
+  const cText = fold(`${c.displayName || ''} ${c.region || ''} ${c.country || ''}`);
+  if (!cText) return 0;
+  // Business/road POIs must never receive a regional boost — a firm literally
+  // named "Banglore Realty" must not outrank the city of Bengaluru. Only real
+  // locations get boosted, so typed region qualifiers inflate places, not POIs.
+  if (!isPlaceLike(c)) return 0;
+  const qTokens = new Set(qFold.split(' '));
+  let boost = 0;
+  for (const t of qTokens) {
+    if (t.length <= 2) continue;
+    if (cText.split(' ').includes(t)) boost = Math.max(boost, 0.2);
+  }
+  return boost;
+}
+
+// Combined ranking score: base textual similarity + small regional preference
+// + explicit query-region boost. Match tier (exact/strong/partial/fuzzy) is
+// still the primary ordering key, so a true international exact match always
+// beats a weak Indian fuzzy match.
+function rankingScore(c, q, score) {
+  return score + regionalTier(c) * 0.05 + explicitRegionBoost(c, q);
+}
+
 export function classifyForQuery(query, candidates) {
   const latinQ = compact(query);
+  const alias = normalizePlaceQuery(query);
   if (!latinQ && candidates.length > 0) {
     const trusted = candidates.slice(0, 6).map(c => ({ c, match: 'exact', score: 1, order: 0 }));
     return { status: 'matches', ranked: trusted, top: trusted, confident: true, ambiguous: false, head: null };
   }
 
   const ranked = candidates.map(c => {
-    const r = rankCandidate(query, c);
+    let r = rankCandidate(query, c);
+    // Query normalization (alias/phonetic): when the user typed/said a known
+    // variant of a canonical place ("Tumko", "Bangalore", "Mangalore"), a
+    // geocoder hit whose name IS that canonical place is promoted to an exact
+    // match; any same-name foreign coincidence ("Tumko, Sudan") is demoted out
+    // of the exact tier so the intended Indian place reliably wins ranking.
+    if (alias) {
+      if (fold(c.placeName || '') === fold(alias)) {
+        r = { score: 1, match: 'exact' };
+      } else if (MATCH_RANK[r.match] < MATCH_RANK.strong) {
+        r = { ...r, match: 'strong' };
+      }
+    }
     return { ...r, c };
   });
   const sorted = ranked
     .map((r, i) => ({ ...r, order: i }))
-    .sort((a, b) => (MATCH_RANK[a.match] - MATCH_RANK[b.match]) || (b.score - a.score) ||
+    .sort((a, b) => (MATCH_RANK[a.match] - MATCH_RANK[b.match]) ||
+      (rankingScore(b.c, query, b.score) - rankingScore(a.c, query, a.score)) ||
       (+POPULATED_TYPES.has(b.c.type) - +POPULATED_TYPES.has(a.c.type)) ||
       ((b.c.importance || 0) - (a.c.importance || 0)) || (a.order - b.order));
 
@@ -302,6 +500,19 @@ export function classifyForQuery(query, candidates) {
   if (ambiguous) head = 'which';
   else if (topMatch === 'fuzzy') head = 'didyoumean';
 
+  // When the top candidate is an unambiguous exact match clearly more
+  // important than its rivals ("Rome, Italy" 0.86 vs any US Rome ~0.5), it is
+  // what the user almost certainly meant — resolve it instead of nagging
+  // "which?".
+  if (ambiguous && top.length >= 2 && top[0].match === 'exact') {
+    const gap = (top[0].c.importance || 0) - (top[1].c.importance || 0);
+    if (gap >= 0.15) {
+      ambiguous = false;
+      confident = true;
+      head = null;
+    }
+  }
+
   if (confident && topMatch === 'partial' && latinQ.length < 14) {
     const topName = compact(top[0].c.placeName || '');
     if (latinQ.length < topName.length && topName.length - latinQ.length > 4) {
@@ -334,10 +545,20 @@ function pickRegion(result) {
 function parseCandidate(d) {
   const osmType = d.osm_type ? String(d.osm_type) : null;
   const osmId = d.osm_id != null ? Number(d.osm_id) : null;
+  const addr = d.address || {};
+  const nd = d.namedetails || {};
+  const defaultName = String(pickPlaceName(d) || d.display_name || '').trim();
+  const defaultDisplay = d.display_name || '';
+  const latinName = latinNameFor(nd, defaultName, defaultDisplay);
   return {
-    placeName: String(pickPlaceName(d) || d.display_name || '').trim(),
+    placeName: latinName || defaultName,
     region: pickRegion(d),
-    displayName: d.display_name || '',
+    displayName: latinName && isNonLatin(defaultDisplay)
+      ? [latinName, addr.state, addr.country].filter(Boolean).join(', ')
+      : defaultDisplay,
+    needsEnglishLabels: isNonLatin(defaultDisplay) && !!latinName,
+    country: String(addr.country || '').trim(),
+    countryCode: String(addr.country_code || '').toUpperCase().trim(),
     lat: parseFloat(d.lat),
     lng: parseFloat(d.lon),
     importance: d.importance != null ? d.importance : 0,
@@ -348,17 +569,41 @@ function parseCandidate(d) {
   };
 }
 
+// Preferred Latin (English) name from Nominatim `namedetails`, patterned so
+// global places keep readable, searchable names regardless of their default
+// (Arabic/Devanagari/CJK) display name. Keeps the original name when it is
+// already Latin.
+function latinNameFor(nd, defaultName, defaultDisplay) {
+  if (!isNonLatin(defaultDisplay) && !isNonLatin(defaultName)) return null;
+  const candidates = [
+    nd['_place_name:en'],
+    nd['name:en'],
+    nd['int_name'],
+    ...Object.keys(nd).sort().filter(k => k.endsWith('-Latn')).map(k => nd[k])
+  ];
+  for (const c of candidates) {
+    const v = String(c || '').trim();
+    if (v && !isNonLatin(v)) return v;
+  }
+  return null;
+}
+
+function isNonLatin(s) {
+  return /[^\u0000-\u024F]/.test(String(s || ''));
+}
+
 async function nominatimQuery(q, limit, signal, { country = null } = {}) {
   const params = new URLSearchParams({
     q,
     format: 'json',
     limit: String(limit),
     addressdetails: '1',
+    namedetails: '1',
     dedupe: '1',
     accept_language: 'en'
   });
   if (country) params.set('countrycodes', country);
-  const res = await fetch(`${NOMINATIM_SEARCH_URL}?${params}`, { headers: SEARCH_HEADERS, signal });
+  const res = await throttledFetch(`${NOMINATIM_SEARCH_URL}?${params}`, { headers: SEARCH_HEADERS, signal });
   if (res.status === 429) {
     const err = new Error('rate-limited');
     err.rateLimited = true;
@@ -388,7 +633,24 @@ async function queryRegion(queries, country, limit, signal) {
       if (seen.size > 0) break;
     } catch (err) {
       if (err && err.name === 'AbortError') throw err;
-      if (err && err.rateLimited) { rateLimited = true; break; }
+      if (err && err.rateLimited) {
+        // Single retry after a polite pause; the request gate above already
+        // spaces traffic, so this is insurance against bursts from other
+        // tabs/processes sharing the same public IP.
+        await new Promise(res => setTimeout(res, 1200));
+        try {
+          const data = await nominatimQuery(queryString, limit, signal, { country });
+          for (const d of data || []) {
+            const c = parseCandidate(d);
+            const key = `${c.lat.toFixed(5)},${c.lng.toFixed(5)}`;
+            if (!seen.has(key)) seen.set(key, c);
+          }
+          continue;
+        } catch (retryErr) {
+          if (retryErr && retryErr.rateLimited) { rateLimited = true; break; }
+          if (retryErr && retryErr.name === 'AbortError') throw retryErr;
+        }
+      }
       if (err && err.httpError) { networkError = true; break; }
       if (err && err.name === 'TypeError' && /fetch/i.test(err.message)) { networkError = true; break; }
     }
@@ -416,17 +678,35 @@ export async function searchCandidates(query, { limit = 8, signal } = {}) {
   const queries = buildQueries(q);
   const hasIndicScript = /[\u0C80-\u0CFF\u0900-\u097F]/.test(q);
   const seen = new Map();
+  const absorb = (r) => { for (const [k, v] of r.seen) if (!seen.has(k)) seen.set(k, v); };
 
   try {
-    const india = await queryRegion(queries, INDIA_FIRST ? INDIA_COUNTRY : null, limit, signal);
-    for (const [k, v] of india.seen) seen.set(k, v);
+    // India-targeted first (cheap, one request). Only widen to the whole world
+    // when India produced nothing confidently usable, so global places always
+    // remain reachable while request volume stays gentle on Nominatim
+    // (public tier limits to ~1 req/s; hammering it causes the 429s that show
+    // up as "no match found for any place").
+    if (!hasIndicScript) {
+      const india = await queryRegion(queries, INDIA_COUNTRY, limit, signal);
+      absorb(india);
+      const indiaGood = classifyForQuery(q, [...seen.values()]);
+      const usable = (indiaGood.ranked || []).some(r => r.match !== 'weak');
+      if (!usable && !india.rateLimited && !india.networkError) {
+        absorb(await queryRegion(queries, null, limit, signal));
+      }
+    } else {
+      absorb(await queryRegion(queries, null, limit, signal));
+    }
 
-    // India-first, not India-only: only when India returns nothing for a
-    // non-Indic query do we widen to the whole world so global places still work.
-    if (INDIA_FIRST && seen.size === 0 && !hasIndicScript && !india.rateLimited && !india.networkError) {
-      const global = await queryRegion(queries, null, limit, signal);
-      for (const [k, v] of global.seen) {
-        if (!seen.has(k)) seen.set(k, v);
+    // Alias/phonetic canonicalization: when the raw token is a known ASR
+    // variant ("Tumko") or alternate spelling ("Bangalore"), also fetch the
+    // canonical spelling's results so the intended Indian place can win
+    // ranking over an accidental foreign same-name hit ("Tumko, Sudan").
+    const alias = normalizePlaceQuery(q);
+    if (alias && fold(alias) !== fold(q)) {
+      const alreadyCanonical = [...seen.values()].some(c => fold(c.placeName || '') === fold(alias) && isPlaceLike(c));
+      if (!alreadyCanonical) {
+        absorb(await queryRegion(buildQueries(alias), null, limit, signal));
       }
     }
   } catch (err) {
@@ -441,7 +721,9 @@ export async function searchCandidates(query, { limit = 8, signal } = {}) {
     }
   }
   const unique = dedupeCandidates([...seen.values()]);
-  const results = unique.slice(0, limit);
+  // Keep a wider pool so ranking (classifyForQuery) can still surface global
+  // results even when late Indian candidates fill the first slots.
+  const results = unique.slice(0, Math.max(limit * 3, 12));
   searchCache.set(cacheKey, { ts: Date.now(), results });
   return results;
 }
@@ -493,7 +775,7 @@ export async function reverseGeocode(lat, lng) {
     zoom: '15',
     accept_language: 'en'
   });
-  const res = await fetch(`${NOMINATIM_REVERSE_URL}?${params}`, { headers: SEARCH_HEADERS });
+  const res = await throttledFetch(`${NOMINATIM_REVERSE_URL}?${params}`, { headers: SEARCH_HEADERS });
   if (res.status === 429) {
     const err = new Error('rate-limited');
     err.rateLimited = true;
@@ -554,7 +836,10 @@ export class LocationAutocomplete {
     this._timer = null;
     this._reqId = 0;
     this._ignoreBlur = false;
+    this._suppressInputEvent = false;
+    this._selectionVersion = 0;
     this.input._autocomplete = this;
+    this.input._selectionVersion = 0;
     this._build();
     this._bind();
   }
@@ -574,6 +859,8 @@ export class LocationAutocomplete {
 
   _bind() {
     this.input.addEventListener('input', () => {
+      if (this._suppressInputEvent) return;
+      this.input._editSeq = (this.input._editSeq || 0) + 1;
       this._clearSelection();
       this._schedule(this.input.value);
       if (this.onInput) this.onInput();
@@ -594,10 +881,16 @@ export class LocationAutocomplete {
         if (item) this.selectItem(item);
       }
     });
+    this.drop.addEventListener('pointerdown', (e) => {
+      this._ignoreBlur = true;
+    });
   }
 
   _clearSelection() {
-    if (this.input._selection) this.input._selection = null;
+    if (this.input._selection) {
+      this.input._selection = null;
+      this.input._selectionVersion = (this.input._selectionVersion || 0) + 1;
+    }
   }
 
   _schedule(q) {
@@ -728,6 +1021,7 @@ export class LocationAutocomplete {
     });
     this.drop.innerHTML = html.join('');
     this.items = Array.from(this.drop.querySelectorAll('[data-index]'));
+    this.items.forEach((el, i) => { el.c = nodes[i] ? nodes[i].c : null; });
   }
 
   showSuggestion(suggestions, { didYouMean = false, heading = null } = {}) {
@@ -752,6 +1046,7 @@ export class LocationAutocomplete {
     });
     this.drop.innerHTML = html.join('');
     this.items = Array.from(this.drop.querySelectorAll('[data-index]'));
+    this.items.forEach((el, i) => { el.c = nodes[i] || null; });
     this.open = true;
     this.drop.style.display = 'block';
     this.input.setAttribute('aria-expanded', 'true');
@@ -761,8 +1056,13 @@ export class LocationAutocomplete {
   selectItem(item) {
     const c = item.c || {};
     if (c.placeName && c.lat != null) rememberCandidate(c);
+    this._suppressInputEvent = true;
     this.input.value = c.placeName || (c.displayName || '').split(',')[0] || this.input.value;
+    this._suppressInputEvent = false;
+    this.input._editSeq = (this.input._editSeq || 0) + 1;
+    this._selectionVersion = (this._selectionVersion || 0) + 1;
     this.input._selection = c;
+    this.input._selectionVersion = this._selectionVersion;
     this.close();
     if (this.onSelect) this.onSelect(c);
   }
@@ -777,6 +1077,7 @@ export class LocationAutocomplete {
     this.drop.innerHTML = '';
     this.input.setAttribute('aria-expanded', 'false');
     this.input.removeAttribute('aria-activedescendant');
+    this._reqId = (this._reqId || 0) + 1;
     if (this.ctrl) { this.ctrl.abort(); this.ctrl = null; }
   }
 
