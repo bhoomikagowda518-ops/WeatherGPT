@@ -527,6 +527,7 @@ body {
 /* Quick Search Chips */
 .quick-chips {
   display: flex;
+  flex-wrap: wrap;
   gap: 6px;
   margin-top: 10px;
 }
@@ -665,7 +666,7 @@ body {
   color: var(--text);
   z-index: 500;
   transition: transform 0.3s ease;
-  max-width: 400px;
+  max-width: min(400px, calc(100vw - 32px));
   text-align: center;
 }
 
@@ -771,6 +772,8 @@ body {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
   margin-bottom: 16px;
 }
 
@@ -887,6 +890,8 @@ body {
 .why-detail-row {
   display: flex;
   justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 4px 16px;
   padding: 8px 0;
   font-size: 13px;
   border-bottom: 1px solid var(--border-light);
@@ -898,11 +903,15 @@ body {
 
 .why-detail-row .label {
   color: var(--text-secondary);
+  min-width: 0;
 }
 
 .why-detail-row .value {
   font-weight: 500;
   color: var(--text);
+  min-width: 0;
+  overflow-wrap: anywhere;
+  text-align: right;
 }
 
 .risk-segments {
@@ -1424,6 +1433,8 @@ body {
   z-index: 600;
   box-shadow: var(--shadow-md);
   opacity: 0;
+  max-width: min(560px, calc(100vw - 32px));
+  text-align: center;
   transition: opacity 0.3s, transform 0.3s;
   pointer-events: none;
 }
@@ -2420,6 +2431,7 @@ body.developer-mode .header-logo {
   z-index: 10;
   display: flex;
   align-items: center;
+  justify-content: center;
   gap: 8px;
   max-width: calc(100% - 24px);
   background: var(--card);
@@ -2437,16 +2449,29 @@ body.developer-mode .header-logo {
 .route-summary-pill .rsp-route,
 .route-summary-pill .rsp-dest {
   letter-spacing: 0.4px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.route-summary-pill .rsp-route::before {
+  content: "📍 ";
+}
+
+.route-summary-pill .rsp-dest::before {
+  content: "🏁 ";
 }
 
 .route-summary-pill .rsp-arrow,
 .route-summary-pill .rsp-dot {
   color: var(--text-muted);
+  flex-shrink: 0;
 }
 
 .route-summary-pill .rsp-meta {
   color: var(--primary);
   font-weight: 700;
+  flex-shrink: 0;
 }
 
 .route-summary-pill .rsp-alt {
@@ -3162,4 +3187,239 @@ body.developer-mode .header-logo {
   font-size: 11px;
   color: var(--text-muted);
   cursor: pointer;
+}
+
+/* ==========================================================================
+   Mobile-first refinement pass — keeps the desktop dashboard intact while
+   making every section genuinely fit and feel native on phones.
+   ========================================================================== */
+
+html {
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
+body {
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* Safe-area breathing room near the app edges */
+@supports (padding: max(0px)) {
+  .header {
+    padding-left: max(20px, env(safe-area-inset-left));
+    padding-right: max(20px, env(safe-area-inset-right));
+  }
+
+  .main {
+    padding-bottom: max(48px, env(safe-area-inset-bottom));
+  }
+
+  .error-toast {
+    bottom: max(24px, env(safe-area-inset-bottom));
+  }
+
+  .vibration-feedback {
+    bottom: calc(env(safe-area-inset-bottom) + 80px);
+  }
+
+  .dev-test-panel {
+    right: max(16px, env(safe-area-inset-right));
+    bottom: max(16px, env(safe-area-inset-bottom));
+  }
+}
+
+/* Prevent iOS focus-zoom by giving inputs a >=16px font size on touch screens */
+@media (max-width: 768px) {
+  .search-input {
+    font-size: 16px;
+  }
+}
+
+/* Destination field has no crosshair button — reclaim the unused right padding */
+.search-input-wrap:last-child .search-input {
+  padding-right: 16px;
+}
+
+/* --- Map on mobile: intentionally tall, still image-led ------------------ */
+@media (max-width: 768px) {
+  .map-container {
+    height: clamp(320px, 48vh, 480px);
+    min-height: 320px;
+    border-radius: 16px;
+  }
+
+  /* Keep place markers inside the viewport near screen edges */
+  .place-marker {
+    max-width: 55vw;
+  }
+
+  .place-marker .place-name {
+    max-width: 34vw;
+  }
+
+  .loc-dropdown {
+    max-height: 45vh;
+  }
+
+  .route-summary-pill {
+    top: 12px;
+    left: 8px;
+    right: 58px;
+    transform: none;
+    justify-content: flex-start;
+    flex-wrap: wrap;
+    white-space: normal;
+    border-radius: 14px;
+    line-height: 1.35;
+    text-align: left;
+    gap: 4px 8px;
+    padding: 7px 12px;
+  }
+
+  .route-summary-pill .rsp-route,
+  .route-summary-pill .rsp-dest {
+    text-overflow: ellipsis;
+    overflow: hidden;
+    max-width: 100%;
+  }
+
+  /* Larger touch targets in the live journey bar */
+  .journey-btn {
+    padding: 10px 16px;
+    font-size: 12.5px;
+  }
+
+  /* Timeline chips may wrap long place names instead of clipping them */
+  .chip-loc {
+    white-space: normal;
+    overflow: visible;
+    text-overflow: clip;
+    line-height: 1.3;
+  }
+
+  .timeline-node {
+    padding: 10px 0;
+  }
+
+  /* Card padding tightens without becoming cramped */
+  .recommendation-card {
+    padding: 18px 16px;
+  }
+
+  .search-section {
+    padding: 16px;
+  }
+
+  .empty-state {
+    padding: 32px 16px;
+  }
+
+  .timeline-section {
+    padding: 12px 10px;
+  }
+}
+
+/* --- Small phones (<=380px): segmented travel modes, tighter rhythm ------- */
+@media (max-width: 380px) {
+  .main {
+    padding-left: 10px;
+    padding-right: 10px;
+  }
+
+  .search-fields {
+    gap: 6px;
+  }
+
+  .mode-chip {
+    padding: 8px 3px;
+    font-size: 11.5px;
+    gap: 3px;
+    white-space: normal;
+    line-height: 1.15;
+  }
+
+  .travel-mode-chips {
+    padding: 3px 2px;
+  }
+
+  .analyze-btn {
+    font-size: 14px;
+    padding: 12px 16px;
+  }
+
+  .chip {
+    font-size: 11.5px;
+  }
+
+  .voice-modal {
+    padding: 28px 16px 20px;
+    width: calc(100% - 24px);
+  }
+
+  .rec-stat .value {
+    font-size: 16px;
+  }
+
+  .verdict-headline {
+    font-size: 18px;
+  }
+
+  .timeline-detail-grid {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+/* --- Voice modal on phones: never cramped, never off-screen --------------- */
+@media (max-width: 480px) {
+  .voice-overlay {
+    align-items: flex-start;
+    justify-content: center;
+    padding: max(env(safe-area-inset-top), 40px) 0 max(env(safe-area-inset-bottom), 24px);
+  }
+
+  .voice-modal {
+    width: calc(100% - 28px);
+    max-width: 380px;
+    padding: 32px 20px 24px;
+    max-height: 86vh;
+  }
+
+  .voice-mic {
+    width: 56px;
+    height: 56px;
+    font-size: 24px;
+  }
+
+  .voice-transcript {
+    font-size: 15px;
+  }
+}
+
+/* --- Fine-tune planning timeline height on short screens ------------------ */
+@media (max-height: 640px) {
+  .timeline-section.sheet-open {
+    max-height: 62vh;
+  }
+
+  .timeline-section:not(.sheet-mode) {
+    max-height: 50vh;
+  }
+}
+
+/* --- Respect reduced-motion preferences ----------------------------------- */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+
+  .route-summary-pill,
+  .tl-chip.active,
+  .voice-overlay,
+  .timeline-section {
+    transition: none !important;
+  }
 }

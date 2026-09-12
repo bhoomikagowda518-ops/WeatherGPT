@@ -793,6 +793,8 @@ function fitMapToRoute(geometry) {
   const coords = geometry.coordinates;
   const bounds = new maplibregl.LngLatBounds();
   for (const c of coords) bounds.extend(c);
+  if (currentRoute?.origin?.lng != null) bounds.extend([currentRoute.origin.lng, currentRoute.origin.lat]);
+  if (currentRoute?.destination?.lng != null) bounds.extend([currentRoute.destination.lng, currentRoute.destination.lat]);
 
   const routeKm = currentRoute ? currentRoute.distance / 1000 : null;
   let maxZoom = 12;
@@ -804,7 +806,7 @@ function fitMapToRoute(geometry) {
   }
 
   const isMobile = window.innerWidth < 600;
-  const padding = isMobile ? 30 : 60;
+  const padding = isMobile ? 72 : 60;
 
   map.fitBounds(bounds, { padding, maxZoom, duration: 800 });
 }
@@ -1181,15 +1183,16 @@ async function handleAnalyze(opts = {}) {
     const fitBtn = document.getElementById('map-fit-route-btn');
     if (fitBtn) fitBtn.style.display = 'flex';
 
-    if (map && map.loaded()) {
-      fitMapToRoute(primary.geometry);
-    } else if (map) {
-      map.on('load', () => fitMapToRoute(primary.geometry));
-    }
-
     document.getElementById('empty-state').classList.add('hidden');
     document.getElementById('results-container').classList.remove('hidden');
     setFlightUIVisible(false);
+
+    if (map) {
+      requestAnimationFrame(() => {
+        map.resize();
+        requestAnimationFrame(() => fitMapToRoute(primary.geometry));
+      });
+    }
 
     renderRecommendation();
     renderTimeline();
@@ -3110,6 +3113,17 @@ function showVoiceToast(msg) {
   }, 3500);
 }
 
+let resizeFitTimer = null;
 window.addEventListener('resize', () => {
   if (map) map.resize();
+  const routeGeo = currentRoute && currentRoute.route && currentRoute.route.geometry;
+  if (window.innerWidth < 600 && routeGeo && routeGeo.coordinates && routeGeo.coordinates.length) {
+    clearTimeout(resizeFitTimer);
+    resizeFitTimer = setTimeout(() => {
+      if (map && currentRoute && currentRoute.route.geometry.coordinates) {
+        map.resize();
+        fitMapToRoute(currentRoute.route.geometry);
+      }
+    }, 350);
+  }
 });
