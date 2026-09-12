@@ -231,7 +231,7 @@ function renderApp() {
           <span class="map-error-sub">We couldn't load map tiles. The route will still be calculated.</span>
         </div>
         <div class="journey-bar hidden" id="journey-bar">
-          <div class="journey-status" id="journey-status">Enable location to start live tracking</div>
+          <div class="journey-status" id="journey-status">Enable location</div>
           <div class="journey-actions">
             <button class="journey-btn" id="live-btn">Start live tracking</button>
             <button class="journey-btn secondary hidden" id="follow-btn">Follow vehicle</button>
@@ -2327,7 +2327,7 @@ function handleLiveStatus(s) {
   switch (s.mode) {
     case 'prompt':
     case 'idle':
-      bar.textContent = 'Enable location to start live tracking';
+      bar.textContent = 'Enable location';
       if (liveMode) {
         liveMode = false;
         lastLiveRenderIdx = -1;

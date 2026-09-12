@@ -1609,11 +1609,13 @@ body {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  background: var(--card);
-  border: 1px solid var(--border-light);
+  background: rgba(255, 255, 255, 0.62);
+  -webkit-backdrop-filter: blur(10px);
+  backdrop-filter: blur(10px);
+  border: 1px solid rgba(148, 163, 184, 0.35);
   border-radius: 12px;
-  padding: 8px 12px;
-  box-shadow: var(--shadow-md);
+  padding: 7px 12px;
+  box-shadow: 0 2px 8px rgba(15, 23, 42, 0.10);
   font-size: 12.5px;
 }
 
@@ -1872,13 +1874,20 @@ body {
 /* Mobile vertical alignment for the here badge */
 @media (max-width: 768px) {
   .journey-bar {
-    flex-direction: column;
-    align-items: stretch;
+    flex-direction: row;
+    align-items: center;
     gap: 8px;
+    padding: 6px 10px;
+  }
+
+  .journey-status {
+    flex: 1;
+    min-width: 0;
   }
 
   .journey-actions {
     justify-content: flex-end;
+    flex-shrink: 0;
   }
 
   .timeline-node.state-current {
@@ -2434,11 +2443,13 @@ body.developer-mode .header-logo {
   justify-content: center;
   gap: 8px;
   max-width: calc(100% - 24px);
-  background: var(--card);
-  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.62);
+  -webkit-backdrop-filter: blur(10px);
+  backdrop-filter: blur(10px);
+  border: 1px solid rgba(148, 163, 184, 0.35);
   border-radius: 999px;
-  box-shadow: var(--shadow-lg, 0 8px 24px rgba(15,23,42,0.12));
-  padding: 8px 14px;
+  box-shadow: 0 2px 8px rgba(15, 23, 42, 0.10);
+  padding: 7px 14px;
   font-size: 12.5px;
   font-weight: 600;
   color: var(--text);
@@ -3262,18 +3273,19 @@ body {
   }
 
   .route-summary-pill {
-    top: 12px;
+    top: 10px;
     left: 8px;
     right: 58px;
     transform: none;
     justify-content: flex-start;
     flex-wrap: wrap;
     white-space: normal;
-    border-radius: 14px;
-    line-height: 1.35;
+    border-radius: 12px;
+    line-height: 1.25;
     text-align: left;
-    gap: 4px 8px;
-    padding: 7px 12px;
+    gap: 2px 6px;
+    padding: 5px 10px;
+    font-size: 12px;
   }
 
   .route-summary-pill .rsp-route,
@@ -3331,15 +3343,15 @@ body {
   }
 
   .mode-chip {
-    padding: 8px 3px;
-    font-size: 11.5px;
-    gap: 3px;
+    padding: 10px 4px;
+    font-size: 13.5px;
+    gap: 4px;
     white-space: normal;
-    line-height: 1.15;
+    line-height: 1.25;
   }
 
   .travel-mode-chips {
-    padding: 3px 2px;
+    padding: 3px;
   }
 
   .analyze-btn {
